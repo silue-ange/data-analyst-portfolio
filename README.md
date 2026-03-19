@@ -59,7 +59,6 @@ Actuellement en préparation du concours **Master Data Science & IA** (INP-HB / 
 ## 📫 Contact
 
 - **Email** : angesilue02@gmail.com
-- **LinkedIn** : [À venir]
 - **Localisation** : Bingerville, Côte d'Ivoire
 
 ---
