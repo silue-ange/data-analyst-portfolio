@@ -1,0 +1,307 @@
+---
+title: "Analyse des dynamiques macroéconomiques de la zone UEMOA (2000-2023)"
+author: "SILUE Chigata Gbambelé Ange"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: flatly
+    code_folding: hide
+    fig_width: 10
+    fig_height: 6
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center"
+)
+
+packages <- c("wbstats", "tidyverse", "plotly", "scales", "kableExtra", "DT")
+
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) {
+  options(repos = c(CRAN = "https://cran.r-project.org"))
+  install.packages(packages[!installed])
+}
+
+lapply(packages, library, character.only = TRUE)
+```
+# Introduction
+
+Cette analyse explore les trajectoires macroéconomiques des 8 pays de l'UEMOA entre 2000 et 2023, en mobilisant les données de la Banque Mondiale. L'objectif est d'examiner les dynamiques de croissance, de comparer les performances nationales et de vérifier empiriquement les faits stylisés de Kaldor.
+
+# Collecte et préparation des données
+
+## Téléchargement des données
+```{r collecte}
+# Pays UEMOA (codes ISO2)
+pays_uemoa <- c("CI", "SN", "ML", "BF", "BJ", "TG", "NE", "GW")
+
+# Indicateurs Banque Mondiale
+indicateurs <- c(
+  "NY.GDP.MKTP.KD",       # PIB réel (USD constants 2015)
+  "NY.GDP.PCAP.KD",       # PIB par habitant réel
+  "NY.GDP.MKTP.KD.ZG",    # Croissance du PIB (%)
+  "NE.GDI.TOTL.ZS",       # Formation brute de capital fixe (% du PIB)
+  "NE.TRD.GNFS.ZS",       # Ouverture commerciale (% du PIB)
+  "FP.CPI.TOTL.ZG",       # Inflation (IPC, %)
+  "SP.POP.TOTL"            # Population totale
+)
+
+# Téléchargement
+donnees_brutes <- wb_data(
+  indicator = indicateurs,
+  country = pays_uemoa,
+  start_date = 2000,
+  end_date = 2023
+)
+
+# Aperçu
+DT::datatable(head(donnees_brutes, 20), caption = "Aperçu des données brutes")
+```
+## Nettoyage et renommage
+```{r nettoyage}
+# Renommer les colonnes pour plus de lisibilité
+donnees <- donnees_brutes %>%
+  select(
+    pays = country,
+    code_pays = iso2c,
+    annee = date,
+    pib_reel = NY.GDP.MKTP.KD,
+    pib_hab = NY.GDP.PCAP.KD,
+    croissance_pib = NY.GDP.MKTP.KD.ZG,
+    investissement = NE.GDI.TOTL.ZS,
+    ouverture_commerciale = NE.TRD.GNFS.ZS,
+    inflation = FP.CPI.TOTL.ZG,
+    population = SP.POP.TOTL
+  )
+
+# Vérifier les valeurs manquantes
+na_summary <- donnees %>%
+  summarise(across(everything(), ~sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Valeurs manquantes")
+
+kableExtra::kbl(na_summary, caption = "Tableau 1 : Valeurs manquantes par variable") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+# Analyse descriptive
+
+## Statistiques de synthèse par pays
+```{r stats_synthese}
+synthese <- donnees %>%
+  group_by(pays) %>%
+  summarise(
+    `PIB/hab moyen (USD)` = round(mean(pib_hab, na.rm = TRUE), 0),
+    `Croissance moyenne (%)` = round(mean(croissance_pib, na.rm = TRUE), 2),
+    `Investissement moyen (% PIB)` = round(mean(investissement, na.rm = TRUE), 2),
+    `Inflation moyenne (%)` = round(mean(inflation, na.rm = TRUE), 2),
+    `Ouverture commerciale (% PIB)` = round(mean(ouverture_commerciale, na.rm = TRUE), 2)
+  ) %>%
+  arrange(desc(`PIB/hab moyen (USD)`))
+
+kbl(synthese, caption = "Tableau 2 : Indicateurs moyens par pays (2000-2023)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Ce tableau révèle les disparités structurelles au sein de l'UEMOA. Les pays à PIB par habitant élevé ne sont pas nécessairement ceux à plus forte croissance, ce qui pose la question de la convergence économique que nous examinerons plus loin.
+
+## Évolution du PIB par habitant
+```{r pib_hab_evolution}
+p1 <- donnees %>%
+  ggplot(aes(x = annee, y = pib_hab, color = pays)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 1.5) +
+  scale_y_continuous(labels = dollar_format(prefix = "", suffix = " $")) +
+  labs(
+    title = "Graphique 1 : Évolution du PIB par habitant (USD constants 2015)",
+    x = "Année",
+    y = "PIB par habitant",
+    color = "Pays"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+ggplotly(p1)
+```
+
+La Côte d'Ivoire se distingue nettement avec un PIB par habitant supérieur, mais on observe un décrochage durant la crise politico-militaire des années 2000-2011, suivi d'une reprise marquée. Les autres pays présentent des trajectoires plus stables mais à des niveaux nettement inférieurs.
+
+## Taux de croissance annuel comparé
+```{r croissance_comparee}
+p2 <- donnees %>%
+  ggplot(aes(x = annee, y = croissance_pib, color = pays)) +
+  geom_line(linewidth = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Graphique 2 : Taux de croissance du PIB réel (%)",
+    x = "Année",
+    y = "Croissance (%)",
+    color = "Pays"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+ggplotly(p2)
+```
+
+La ligne rouge en pointillés marque le seuil de croissance nulle. On observe une forte volatilité commune autour de 2020, correspondant au choc COVID-19. La Côte d'Ivoire affiche une croissance négative marquée en 2011 (crise post-électorale), tandis que le Mali connaît un recul similaire en 2012 (coup d'État et crise sécuritaire au Nord).
+
+## Calcul du TCAM (Taux de Croissance Annuel Moyen)
+```{r tcam}
+tcam <- donnees %>%
+  group_by(pays) %>%
+  filter(annee %in% c(2000, 2023)) %>%
+  summarise(
+    pib_hab_2000 = round(pib_hab[annee == 2000], 0),
+    pib_hab_2023 = round(pib_hab[annee == 2023], 0),
+    n = 23
+  ) %>%
+  mutate(
+    TCAM = round(((pib_hab_2023 / pib_hab_2000)^(1/n) - 1) * 100, 2)
+  ) %>%
+  arrange(desc(TCAM))
+
+kbl(tcam, 
+    caption = "Tableau 3 : TCAM du PIB par habitant (2000-2023)",
+    col.names = c("Pays", "PIB/hab 2000", "PIB/hab 2023", "Années", "TCAM (%)")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+Le TCAM est préféré à la moyenne arithmétique des taux de croissance car il tient compte de l'effet de composition (intérêts composés). Il mesure le rythme de croissance constant qui aurait produit le même résultat final sur la période.
+
+# Analyse comparative
+
+## Test de β-convergence
+
+La β-convergence stipule que les pays initialement plus pauvres croissent plus vite que les pays riches, conduisant à un rattrapage. On la teste par une régression simple : TCAM en fonction du log du PIB/hab initial.
+```{r beta_convergence}
+# Préparer les données de convergence
+convergence <- donnees %>%
+  group_by(pays) %>%
+  filter(annee %in% c(2000, 2023)) %>%
+  summarise(
+    pib_hab_2000 = pib_hab[annee == 2000],
+    pib_hab_2023 = pib_hab[annee == 2023]
+  ) %>%
+  mutate(
+    log_pib_initial = log(pib_hab_2000),
+    tcam = ((pib_hab_2023 / pib_hab_2000)^(1/23) - 1) * 100
+  )
+
+# Régression
+reg_conv <- lm(tcam ~ log_pib_initial, data = convergence)
+
+# Graphique
+p3 <- ggplot(convergence, aes(x = log_pib_initial, y = tcam)) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_smooth(method = "lm", se = TRUE, color = "red", linetype = "dashed") +
+  geom_text(aes(label = pays), vjust = -0.8, size = 3.5) +
+  labs(
+    title = "Graphique 3 : Test de β-convergence (2000-2023)",
+    x = "Log du PIB par habitant initial (2000)",
+    y = "TCAM du PIB/hab (%)"
+  ) +
+  theme_minimal()
+
+ggplotly(p3)
+
+# Résultats de la régression
+summary(reg_conv)
+```
+
+Un coefficient négatif et significatif de la variable `log_pib_initial` indiquerait une β-convergence : plus un pays est pauvre au départ, plus il croît vite. L'interprétation doit cependant rester prudente avec seulement 8 observations.
+
+## Vérification des faits stylisés de Kaldor
+
+Le premier fait stylisé de Kaldor stipule une relation positive entre le taux d'investissement et la croissance économique. Le second met en lien l'ouverture commerciale et la croissance.
+
+### Investissement et croissance
+```{r kaldor_investissement}
+p4 <- donnees %>%
+  filter(!is.na(investissement)) %>%
+  ggplot(aes(x = investissement, y = croissance_pib, color = pays)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(aes(group = 1), method = "lm", se = TRUE, 
+              color = "red", linetype = "dashed") +
+  labs(
+    title = "Graphique 4 : Investissement vs Croissance du PIB",
+    x = "Formation brute de capital fixe (% du PIB)",
+    y = "Croissance du PIB (%)",
+    color = "Pays"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+ggplotly(p4)
+
+# Corrélation
+cor_inv <- cor.test(donnees$investissement, donnees$croissance_pib, 
+                     use = "complete.obs")
+cat("Corrélation de Pearson :", round(cor_inv$estimate, 3), 
+    "\np-value :", round(cor_inv$p.value, 4))
+```
+
+### Ouverture commerciale et croissance
+```{r kaldor_ouverture}
+p5 <- donnees %>%
+  filter(!is.na(ouverture_commerciale)) %>%
+  ggplot(aes(x = ouverture_commerciale, y = croissance_pib, color = pays)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(aes(group = 1), method = "lm", se = TRUE, 
+              color = "red", linetype = "dashed") +
+  labs(
+    title = "Graphique 5 : Ouverture commerciale vs Croissance du PIB",
+    x = "Ouverture commerciale (% du PIB)",
+    y = "Croissance du PIB (%)",
+    color = "Pays"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+ggplotly(p5)
+
+cor_ouv <- cor.test(donnees$ouverture_commerciale, donnees$croissance_pib, 
+                     use = "complete.obs")
+cat("Corrélation de Pearson :", round(cor_ouv$estimate, 3), 
+    "\np-value :", round(cor_ouv$p.value, 4))
+```
+# Limites de l'analyse
+```{r limites, echo=FALSE}
+limites <- data.frame(
+  Limite = c(
+    "Taille de l'échantillon",
+    "Données agrégées",
+    "Période d'analyse",
+    "Variables omises",
+    "Causalité"
+  ),
+  Description = c(
+    "8 pays seulement, ce qui limite la puissance des tests statistiques (notamment la β-convergence)",
+    "Les données Banque Mondiale sont des estimations nationales qui masquent les disparités infranationales et le secteur informel",
+    "La période 2000-2023 inclut plusieurs chocs exogènes (crises politiques, COVID-19) qui perturbent les tendances de long terme",
+    "Des facteurs clés comme la qualité institutionnelle, le capital humain ou les envois de fonds ne sont pas intégrés",
+    "Les corrélations observées (Kaldor) ne permettent pas d'établir de liens de causalité"
+  )
+)
+
+kbl(limites, caption = "Tableau 4 : Limites méthodologiques") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = TRUE)
+```
+
+# Conclusion
+
+Cette analyse a mis en évidence plusieurs résultats structurants sur les dynamiques macroéconomiques de l'UEMOA :
+
+1. **Des disparités persistantes** : le PIB par habitant de la Côte d'Ivoire reste environ 4 fois supérieur à celui du Niger, malgré 23 ans d'intégration régionale.
+
+2. **Des signaux de convergence** : les pays les plus pauvres (Burkina Faso, Niger) affichent les TCAM les plus élevés, mais cette tendance n'est pas statistiquement significative (p = 0.285).
+
+3. **Une validation partielle de Kaldor** : l'investissement est faiblement mais significativement corrélé à la croissance (r = 0.20, p < 0.01), tandis que l'ouverture commerciale n'a aucun effet détectable, ce qui interroge la structure des échanges dans la zone.
+
+4. **Une stabilité nominale remarquable** : l'inflation reste contenue et homogène grâce à la politique monétaire commune de la BCEAO.
+
+Ces résultats suggèrent que l'intégration monétaire seule est insuffisante pour garantir la convergence réelle, et que les politiques structurelles nationales (qualité de l'investissement, diversification des exportations) jouent un rôle déterminant.
